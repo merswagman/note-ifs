@@ -6,8 +6,12 @@ open.
 
 ## Current phase
 
-**Phase 1: Skeleton** — basic Flask app, status page, and cron stub exist
-and run locally; not yet deployed to Vercel.
+**Phase 1: Skeleton** — complete. Flask app deployed to Vercel
+(https://note-ifs.vercel.app), hourly checks running via GitHub Actions
+with `CRON_SECRET` enforced end-to-end. Remaining loose end: confirm
+Vercel's GitHub App has deploy-on-push access (not yet needed, since
+deploys so far are manual `vercel deploy`). Next up: Phase 2 (firm up
+config schema) and Phase 3 (email delivery).
 
 ## Decisions log
 
@@ -35,21 +39,22 @@ and run locally; not yet deployed to Vercel.
 - [x] `/api/cron/check` endpoint, checks `Authorization: Bearer <CRON_SECRET>`
       when `CRON_SECRET` is set, currently just reports it ran (no real
       checks yet — that's Phase 4).
-- [x] `vercel.json` `crons` entry wired to `/api/cron/check` every 6 hours.
+- [x] ~~`vercel.json` `crons` entry wired to `/api/cron/check` every 6
+      hours~~ — superseded: Hobby-plan Vercel Cron can't run more than
+      once/day, so scheduling moved entirely to GitHub Actions instead (see
+      decisions log).
 - [x] Verified locally with Flask's test client (`/` and `/api/cron/check`
       both return 200).
 - [x] Deployed to Vercel and confirmed reachable: https://note-ifs.vercel.app
       — both `/` and `/api/cron/check` return 200 in production.
-- [ ] **User action needed**: generate a `CRON_SECRET` value and add it in
-      two places — Vercel project env vars (Production) and this repo's
-      GitHub Actions secrets (Settings → Secrets and variables → Actions),
-      both named `CRON_SECRET`, same value. Claude doesn't handle the
-      secret value itself for this one (user-generated, user-set) — see
-      `.github/workflows/hourly-check.yml`, which references
-      `secrets.CRON_SECRET` by name only. Until this is done,
-      `/api/cron/check`'s auth check is a no-op and the endpoint is open to
-      anyone (harmless while it only reports "ran", but must be set before
-      Phase 4 makes it do real work).
+- [x] `CRON_SECRET` set by Christopher in both Vercel (Production env var)
+      and GitHub Actions repo secrets — confirmed enforced: unauthenticated
+      requests to `/api/cron/check` now 401, and a manual
+      `workflow_dispatch` run of the Actions workflow got back
+      `{"ok":true,...}` using the real secret, end-to-end.
+- [x] Hourly scheduling confirmed live: `.github/workflows/hourly-check.yml`
+      is registered and active on GitHub (`17 * * * *` + manual
+      `workflow_dispatch`), verified via a real triggered run.
 - [ ] Confirm the Vercel GitHub App actually has install access to
       `merswagman/note-ifs` (Vercel dashboard → Settings → Git, or GitHub →
       Settings → Applications → Vercel). The project's Git connection is
