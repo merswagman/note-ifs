@@ -20,6 +20,11 @@ class PermitCheckError(RuntimeError):
     pass
 
 
+def registration_url(permit_id, date):
+    """The human-facing page to book a permit, for a given date."""
+    return f"https://www.recreation.gov/permits/{permit_id}/registration/detailed-availability?date={date}"
+
+
 def _fetch_month_availability(permit_id, division_id, year, month):
     url = f"{RECREATION_GOV_BASE}/{permit_id}/division/{division_id}/availability/month"
     try:

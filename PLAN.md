@@ -6,15 +6,13 @@ open.
 
 ## Current phase
 
-**Phase 4: recreation.gov permit checker** — complete, deployed to
-production is the remaining step. `permit_checker.py` fetches recreation.gov
-live, and `/api/cron/check` now emails when (and only when) availability is
-found for the real Capitol Lake / 2026-07-18 watch — no persisted state,
-by explicit user choice (repeat notifications while it stays open are
-fine). Verified end-to-end twice, including a real received test email.
-Not yet redeployed to Vercel since this last round of changes — do that
-next, then Phase 5 (state persistence) is on hold indefinitely unless the
-hourly-repeat behavior becomes annoying.
+**Phase 4 (checker) and Phase 6 (UI, visual pass)** — both in good shape.
+Phase 4 is complete and deployed: emails include a direct recreation.gov
+booking link per available date, verified in a real received email. Phase
+6 got a restyled status page (cards, light/dark, next-check time) verified
+by screenshotting the Flask dev server with headless Chromium — not yet
+redeployed to Vercel. Do that next. Phase 5 (state persistence) remains on
+hold by explicit user choice.
 
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
@@ -39,6 +37,7 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 | 2026-07-15 | Config schema bumped v1 → v2: `permit` params gained required `division_ids` and `dates` | The v1 shape (just `permit_id`) couldn't express which zone/date to check — discovered once the research spike showed a permit has multiple independently-quota'd divisions. Real breaking change to the only existing config entry, which was rewritten (not migrated) since there's a single user and no back-compat need. |
 | 2026-07-15 | Added `requests` as a dependency | `permit_checker.py` needs custom headers (User-Agent workaround) and clean error handling against recreation.gov; stdlib `urllib` would work but be noticeably more verbose for this. First non-Flask dependency in the project. |
 | 2026-07-15 | Phase 5 (dedup/state persistence) deliberately skipped for now; checker wired straight to email | User's explicit call: "we can hold off on the persistence... I think I want to be spammed by it for now. (but only email me when there's availability and not when there's not)." So `/api/cron/check` re-checks and re-emails every hour availability persists, with no memory of previous runs. Revisit Phase 5 only if this becomes annoying in practice. |
+| 2026-07-15 | Status page shows a computed "next check" time, not a tracked "last checked" time | A real last-checked timestamp needs persisted state (same blocker as Phase 5, still on hold); the next scheduled run is fully derivable from the known GitHub Actions cron schedule (`17 * * * *`) with no storage needed. Must be kept in sync by hand with the workflow file if the schedule changes — there's a pointer comment in `app.py` at `CRON_MINUTE_PAST_HOUR`. |
 
 ## Phases
 
@@ -195,6 +194,11 @@ here by design.
       target correctly found nothing and sent no email; (2) a mocked
       `CHECKERS["permit"]` returning a fake available slot correctly
       triggered a real send, and Christopher confirmed the email arrived.
+- [x] Email body now includes a direct `registration_url(permit_id, date)`
+      link per available date (same URL pattern Christopher originally
+      gave: `/permits/{permit_id}/registration/detailed-availability?date={date}`)
+      so he can jump straight to booking instead of just getting a bare
+      notification. Verified in a real received email.
 - [x] Bumped `vercel.json`'s `maxDuration` 30s → 60s (9 sequential
       recreation.gov requests per run) and added a 0.3s courtesy delay
       between requests in `permit_checker.py`.
@@ -212,8 +216,23 @@ User explicitly chose repeat/duplicate emails over building this now (see
 - [ ] Read/write helpers for "last checked" + "last notified state" per
       watch id.
 
-### Phase 6: Light UI, read side
-- [ ] Show configured watches and their last-checked/last-notified state.
+### Phase 6: Light UI, read side — visual pass done, state display still open
+- [x] Restyled the status page (`STATUS_HTML` in `app.py`): card-based watch
+      list, enabled/disabled shown as a colored dot + muted label rather
+      than a CSS class no one could see, a type badge, light/dark support
+      via `prefers-color-scheme` (verified both render correctly by
+      screenshotting the Flask dev server with headless Chromium, including
+      the disabled-watch state).
+- [x] Shows **next** scheduled check time (`next_check_time()`), computed
+      from the known GitHub Actions cron schedule (`17 * * * *`) rather than
+      tracked — no state store exists (Phase 5 is on hold), so this is
+      derived, not measured. Must be kept in sync by hand with
+      `.github/workflows/hourly-check.yml` if that schedule ever changes;
+      there's a comment at `CRON_MINUTE_PAST_HOUR` in `app.py` pointing back
+      at the workflow file.
+- [ ] A true **last**-checked timestamp (vs. computed next-check) would
+      need real persisted state — same blocker as Phase 5, intentionally
+      not built.
 - [ ] No editing through the UI yet (config stays git-committed per the
       storage split above).
 - [ ] Decide whether the UI needs auth (it'll be a public Vercel URL by
