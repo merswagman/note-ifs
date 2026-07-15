@@ -6,8 +6,8 @@ open.
 
 ## Current phase
 
-**Phase 0: Docs/scaffolding** — in progress. README/CLAUDE.md/PLAN.md written;
-no application code yet.
+**Phase 1: Skeleton** — basic Flask app, status page, and cron stub exist
+and run locally; not yet deployed to Vercel.
 
 ## Decisions log
 
@@ -18,29 +18,38 @@ no application code yet.
 | 2026-07-14 | Email for delivery | User preference; simplest reliable channel to start. |
 | 2026-07-14 | First check: recreation.gov permits | User's starting use case. |
 | 2026-07-14 | Config = JSON file committed to repo; runtime state = Vercel Blob/KV | Vercel's filesystem is read-only at runtime, so a repo JSON file can't hold mutable "already notified" state. Splitting static config from mutable state keeps the "JSON database" mental model while actually working on Vercel. |
+| 2026-07-14 | Entrypoint is root `app.py` with a top-level `app` Flask instance; no `builds`/`routes` in `vercel.json` | Confirmed against current Vercel docs (fetched during Phase 1): Vercel auto-detects Flask from `requirements.txt` + a supported entrypoint filename (`app.py`, `index.py`, `server.py`, `main.py`, `wsgi.py`, `asgi.py`, or the same under `src/`/`app/`/`api/`). The whole app deploys as one Vercel Function. |
 
 ## Phases
 
 ### Phase 1: Skeleton
-- [ ] Flask app scaffolded for Vercel's Python runtime (`api/index.py` or
-      equivalent entrypoint + `vercel.json`).
-- [ ] `requirements.txt` with Flask pinned.
-- [ ] One page of light UI: static status page (even just "it's alive" +
-      current config summary).
-- [ ] One HTTP endpoint intended for Vercel Cron to hit, protected by the
-      cron secret header, that currently no-ops.
-- [ ] `vercel.json` `crons` entry wired to that endpoint on a sane interval
-      (e.g. every few hours — permit availability doesn't need minute-level
-      polling).
-- [ ] Deployed to Vercel and confirmed reachable.
+- [x] Flask app scaffolded for Vercel's Python runtime: `app.py` at repo
+      root defines the `app` Flask instance (Vercel's supported entrypoint
+      convention — confirmed against current Vercel docs, no legacy
+      `builds`/`routes` needed).
+- [x] `requirements.txt` with Flask pinned.
+- [x] One page of light UI at `/`: status page listing configured watches
+      from `config/config.json`.
+- [x] `/api/cron/check` endpoint, checks `Authorization: Bearer <CRON_SECRET>`
+      when `CRON_SECRET` is set, currently just reports it ran (no real
+      checks yet — that's Phase 4).
+- [x] `vercel.json` `crons` entry wired to `/api/cron/check` every 6 hours.
+- [x] Verified locally with Flask's test client (`/` and `/api/cron/check`
+      both return 200).
+- [ ] Deployed to Vercel and confirmed reachable (needs a Vercel project
+      link — not done yet, no Vercel project/token configured in this
+      session).
 
 ### Phase 2: Config schema
-- [ ] Define `config.json` shape for a "watch" — at minimum: id, type
-      (`permit` initially), human label, source-specific params, enabled
-      flag.
-- [ ] Document the schema here once it's settled (replace this bullet with
-      the actual schema/example).
-- [ ] Loader that reads and validates `config.json` at request/cron time.
+- [x] Draft shape in place at `config/config.json`: a `watches` array of
+      `{id, type, label, enabled, params}`, with one disabled placeholder
+      entry (`type: "permit"`, `params.source: "recreation.gov"`). Not yet
+      validated against a real permit — placeholder only.
+- [ ] Firm up the schema once Phase 4's research spike shows what params a
+      real recreation.gov permit watch actually needs.
+- [ ] Add schema validation (reject malformed `config.json` at load time
+      instead of failing deep in a request) — currently `load_config()` in
+      `app.py` does a bare `json.load` with no validation.
 
 ### Phase 3: Email delivery
 - [ ] Choose email path: SMTP with env-var credentials vs. a transactional

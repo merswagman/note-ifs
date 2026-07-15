@@ -1,0 +1,14 @@
+{
+  "watches": [
+    {
+      "id": "example-permit",
+      "type": "permit",
+      "label": "Example wilderness permit (placeholder, not a real watch yet)",
+      "enabled": false,
+      "params": {
+        "source": "recreation.gov",
+        "permit_id": "TBD"
+      }
+    }
+  ]
+}
