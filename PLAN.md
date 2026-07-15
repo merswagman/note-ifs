@@ -6,14 +6,15 @@ open.
 
 ## Current phase
 
-**Phase 4: recreation.gov permit checker** — checker built and verified
-against live data; not yet wired to send real emails. `permit_checker.py`
-correctly fetches recreation.gov and reports availability for the real
-first watch (Capitol Lake, Maroon Bells-Snowmass Wilderness, 2026-07-18 —
-currently no openings across all 9 sites). Deliberately not wired into
-`/api/cron/check` yet: doing so before Phase 5 exists would either miss
-repeat availability or spam an email every hour it stays open. Next up:
-Phase 5 (state persistence), which unblocks the final wiring.
+**Phase 4: recreation.gov permit checker** — complete, deployed to
+production is the remaining step. `permit_checker.py` fetches recreation.gov
+live, and `/api/cron/check` now emails when (and only when) availability is
+found for the real Capitol Lake / 2026-07-18 watch — no persisted state,
+by explicit user choice (repeat notifications while it stays open are
+fine). Verified end-to-end twice, including a real received test email.
+Not yet redeployed to Vercel since this last round of changes — do that
+next, then Phase 5 (state persistence) is on hold indefinitely unless the
+hourly-repeat behavior becomes annoying.
 
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
@@ -37,6 +38,7 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 | 2026-07-15 | recreation.gov availability endpoint confirmed as `/api/permititinerary/{permit_id}/division/{division_id}/availability/month` | Found via Phase 4's research spike (grepping the permit page's JS bundle), not assumed — see Phase 4 section for the full contract, User-Agent gotcha, and the Capitol Lake multi-division finding. |
 | 2026-07-15 | Config schema bumped v1 → v2: `permit` params gained required `division_ids` and `dates` | The v1 shape (just `permit_id`) couldn't express which zone/date to check — discovered once the research spike showed a permit has multiple independently-quota'd divisions. Real breaking change to the only existing config entry, which was rewritten (not migrated) since there's a single user and no back-compat need. |
 | 2026-07-15 | Added `requests` as a dependency | `permit_checker.py` needs custom headers (User-Agent workaround) and clean error handling against recreation.gov; stdlib `urllib` would work but be noticeably more verbose for this. First non-Flask dependency in the project. |
+| 2026-07-15 | Phase 5 (dedup/state persistence) deliberately skipped for now; checker wired straight to email | User's explicit call: "we can hold off on the persistence... I think I want to be spammed by it for now. (but only email me when there's availability and not when there's not)." So `/api/cron/check` re-checks and re-emails every hour availability persists, with no memory of previous runs. Revisit Phase 5 only if this becomes annoying in practice. |
 
 ## Phases
 
@@ -180,15 +182,29 @@ here by design.
       (all 9 sites show `remaining: 0` right now), and a synthetic check
       against known-open September 2026 dates correctly returned the
       available date/division/count.
-- [ ] Compare against last-known state — blocked on Phase 5 (no persistent
-      state store yet).
-- [ ] Wire checker → state store (Phase 5) → email (Phase 3) → cron endpoint
-      (Phase 1) — not done. Deliberately not wiring the checker into
-      `/api/cron/check` yet: without Phase 5's "already notified" state, an
-      hourly cron run would either do nothing on repeat availability or
-      email the same opening every hour until it's booked. Phase 5 first.
+- [x] Wired into `/api/cron/check` → `notifier.send_notification` — **without**
+      Phase 5 state, on explicit user instruction: "hold off on the
+      persistence... I think I want to be spammed by it for now." Every
+      hourly run re-checks and re-emails for as long as availability
+      persists; nothing is sent when there's none. `CHECKERS = {"permit":
+      check_permit_watch}` dict dispatch added in `app.py` so future watch
+      types (chore, calendar) plug in the same way. Per-watch errors
+      (`PermitCheckError`, `EmailConfigError`) are caught and reported in
+      the JSON response rather than crashing the whole cron run.
+- [x] Verified end-to-end twice: (1) real run against the live Capitol Lake
+      target correctly found nothing and sent no email; (2) a mocked
+      `CHECKERS["permit"]` returning a fake available slot correctly
+      triggered a real send, and Christopher confirmed the email arrived.
+- [x] Bumped `vercel.json`'s `maxDuration` 30s → 60s (9 sequential
+      recreation.gov requests per run) and added a 0.3s courtesy delay
+      between requests in `permit_checker.py`.
+- Phase 5 (state persistence / dedup) is intentionally **not** being built
+  right now — revisit only if the hourly-spam behavior becomes annoying in
+  practice.
 
-### Phase 5: Runtime state persistence
+### Phase 5: Runtime state persistence — on hold, deliberately
+User explicitly chose repeat/duplicate emails over building this now (see
+2026-07-15 decisions log entry). Nothing below is started.
 - [ ] Pick primitive: Vercel Blob (simple JSON blob mirroring config shape)
       vs. Vercel KV/Upstash Redis (better for per-watch key lookups). Default
       assumption: start with Blob for simplicity, revisit if per-key access

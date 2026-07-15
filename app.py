@@ -4,8 +4,15 @@ from datetime import datetime, timezone
 from flask import Flask, jsonify, request
 
 from config_schema import ConfigError, load_config as _load_config
+from notifier import EmailConfigError, send_notification
+from permit_checker import PermitCheckError, check_permit_watch
 
 app = Flask(__name__)
+
+# Extend this as new watch types (chore, calendar, ...) get their own checker.
+CHECKERS = {
+    "permit": check_permit_watch,
+}
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "config.json")
 
@@ -68,13 +75,44 @@ def cron_check():
     except ConfigError as e:
         return jsonify({"error": str(e)}), 500
 
-    # Phase 4 (see PLAN.md) will fetch each enabled watch from its source,
-    # compare against stored state, and send email on a change. For now
-    # this just confirms the cron wiring works end-to-end.
+    # No "already notified" state yet (see PLAN.md Phase 5) -- by design,
+    # for now this emails every run for as long as availability persists,
+    # rather than staying silent when there's nothing to report.
+    results = []
+    for watch in config.get("watches", []):
+        if not watch.get("enabled"):
+            continue
+        checker = CHECKERS.get(watch["type"])
+        if checker is None:
+            continue
+
+        try:
+            availability = checker(watch)
+        except PermitCheckError as e:
+            results.append({"id": watch["id"], "error": str(e)})
+            continue
+
+        result = {"id": watch["id"], "availability": availability}
+        results.append(result)
+
+        if availability:
+            lines = [f"{watch['label']} ({watch['id']})", ""]
+            for date, by_division in sorted(availability.items()):
+                for division_id, remaining in by_division.items():
+                    lines.append(f"  {date}: division {division_id} -- {remaining} remaining")
+            try:
+                send_notification(
+                    f"note-ifs: availability found -- {watch['label']}",
+                    "\n".join(lines),
+                )
+            except EmailConfigError as e:
+                result["email_error"] = str(e)
+
     return jsonify(
         {
             "ok": True,
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "watches_seen": len(config.get("watches", [])),
+            "results": results,
         }
     )

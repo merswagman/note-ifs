@@ -1,3 +1,5 @@
+import time
+
 import requests
 
 # recreation.gov blocks requests carrying the default python-requests
@@ -9,6 +11,9 @@ USER_AGENT = (
 )
 
 RECREATION_GOV_BASE = "https://www.recreation.gov/api/permititinerary"
+
+# Courtesy delay between sequential requests to the same third-party API.
+REQUEST_DELAY_SECONDS = 0.3
 
 
 class PermitCheckError(RuntimeError):
@@ -50,7 +55,9 @@ def check_permit_watch(watch):
     months_needed = sorted({(date[:4], date[5:7]) for date in dates})
 
     available = {}
-    for division_id in division_ids:
+    for i, division_id in enumerate(division_ids):
+        if i > 0:
+            time.sleep(REQUEST_DELAY_SECONDS)
         month_cache = {
             (year, month): _fetch_month_availability(permit_id, division_id, year, int(month))
             for year, month in months_needed
