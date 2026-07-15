@@ -19,7 +19,8 @@ and run locally; not yet deployed to Vercel.
 | 2026-07-14 | First check: recreation.gov permits | User's starting use case. |
 | 2026-07-14 | Config = JSON file committed to repo; runtime state = Vercel Blob/KV | Vercel's filesystem is read-only at runtime, so a repo JSON file can't hold mutable "already notified" state. Splitting static config from mutable state keeps the "JSON database" mental model while actually working on Vercel. |
 | 2026-07-14 | Entrypoint is root `app.py` with a top-level `app` Flask instance; no `builds`/`routes` in `vercel.json` | Confirmed against current Vercel docs (fetched during Phase 1): Vercel auto-detects Flask from `requirements.txt` + a supported entrypoint filename (`app.py`, `index.py`, `server.py`, `main.py`, `wsgi.py`, `asgi.py`, or the same under `src/`/`app/`/`api/`). The whole app deploys as one Vercel Function. |
-| 2026-07-14 | Cron schedule is daily (`0 13 * * *`), not every 6 hours | Hobby-plan Vercel accounts only allow cron jobs that run once per day — a `0 */6 * * *` schedule made every deploy fail instantly with `deploy_failed`, which is what caused the "error for a second, no deploy visible" symptom the user hit. Revisit if the account moves to Pro and more frequent permit checks are wanted. |
+| 2026-07-14 | Cron schedule is daily (`0 13 * * *`), not every 6 hours | Hobby-plan Vercel accounts only allow cron jobs that run once per day — a `0 */6 * * *` schedule made every deploy fail instantly with `deploy_failed`, which is what caused the "error for a second, no deploy visible" symptom the user hit. Superseded same day — see next entry. |
+| 2026-07-14 | Scheduling moved entirely to a GitHub Actions workflow (`.github/workflows/hourly-check.yml`, hourly), `vercel.json`'s `crons` block removed | User wants hourly checks; Hobby-plan Vercel Cron can't go below daily and Vercel's Workflow DevKit (which could durably `sleep()` around the limit) is TypeScript/Node-only, not usable from this Flask/Python app. GitHub Actions is free, needs no new language/service, and avoids two schedulers hitting the same endpoint. Tradeoff: GitHub disables scheduled workflows after 60 days of repo inactivity, and timing can drift a few minutes under GitHub's load — acceptable for a permit check. |
 
 ## Phases
 
@@ -39,11 +40,16 @@ and run locally; not yet deployed to Vercel.
       both return 200).
 - [x] Deployed to Vercel and confirmed reachable: https://note-ifs.vercel.app
       — both `/` and `/api/cron/check` return 200 in production.
-- [ ] Set a `CRON_SECRET` env var in the Vercel project. Right now
-      `/api/cron/check` has no secret configured, so the auth check in
-      `app.py` is a no-op and the endpoint is open to anyone — fine while it
-      only reports "ran", but must be set before Phase 4 makes it do real
-      work.
+- [ ] **User action needed**: generate a `CRON_SECRET` value and add it in
+      two places — Vercel project env vars (Production) and this repo's
+      GitHub Actions secrets (Settings → Secrets and variables → Actions),
+      both named `CRON_SECRET`, same value. Claude doesn't handle the
+      secret value itself for this one (user-generated, user-set) — see
+      `.github/workflows/hourly-check.yml`, which references
+      `secrets.CRON_SECRET` by name only. Until this is done,
+      `/api/cron/check`'s auth check is a no-op and the endpoint is open to
+      anyone (harmless while it only reports "ran", but must be set before
+      Phase 4 makes it do real work).
 - [ ] Confirm the Vercel GitHub App actually has install access to
       `merswagman/note-ifs` (Vercel dashboard → Settings → Git, or GitHub →
       Settings → Applications → Vercel). The project's Git connection is

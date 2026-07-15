@@ -1,0 +1,15 @@
+name: Hourly check
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  trigger-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/cron/check
+        run: |
+          curl -sf -X POST https://note-ifs.vercel.app/api/cron/check \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

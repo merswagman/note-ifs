@@ -43,8 +43,17 @@ committed config, mutable state in Blob/KV.
   these are undocumented/reverse-engineered and change. Verify against real
   responses (recorded fixtures or a research spike) before committing to an
   endpoint shape, and note the source/assumptions in PLAN.md.
-- Secrets (email credentials, Blob/KV tokens) go in Vercel environment
-  variables, never in the committed config JSON or in code.
+- Secrets (email credentials, Blob/KV tokens, `CRON_SECRET`) go in Vercel
+  environment variables, never in the committed config JSON or in code.
+  Christopher generates and sets these himself (Vercel dashboard/CLI and
+  GitHub Actions repo secrets) rather than having Claude generate or handle
+  the plaintext value — Claude's job is to reference them by name
+  (`secrets.CRON_SECRET`, `os.environ["..."]`), not to create or transmit
+  them.
+- If a `GITHUB_TOKEN` env var is present, `gh` CLI is usable for read
+  operations (checking Actions run status/logs, PRs, issues). Don't use it
+  to write/rotate secrets — that stays a manual, user-driven step per the
+  point above.
 - Keep the config JSON schema documented in PLAN.md as it evolves — it's the
   main "database" of this app, so changes to its shape are architecturally
   significant, not incidental.
