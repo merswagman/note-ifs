@@ -54,9 +54,14 @@ committed config, mutable state in Blob/KV.
   operations (checking Actions run status/logs, PRs, issues). Don't use it
   to write/rotate secrets — that stays a manual, user-driven step per the
   point above.
-- Keep the config JSON schema documented in PLAN.md as it evolves — it's the
+- The config JSON schema (v1, `config/config.json`) is validated by
+  `config_schema.py` and documented in PLAN.md's Phase 2 section — it's the
   main "database" of this app, so changes to its shape are architecturally
-  significant, not incidental.
+  significant, not incidental. When adding a new watch `type` (chore,
+  calendar, ...), extend `KNOWN_WATCH_TYPES`/add its params validation in
+  `config_schema.py` *and* update the schema doc in PLAN.md in the same
+  change, and bump `CONFIG_VERSION` if the change isn't backward compatible
+  with existing `config/config.json` content.
 - Cron endpoints should verify the Vercel cron secret header before doing
   work (see Vercel Cron docs) — they're just HTTP endpoints otherwise.
 

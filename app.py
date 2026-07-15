@@ -1,8 +1,9 @@
-import json
 import os
 from datetime import datetime, timezone
 
 from flask import Flask, jsonify, request
+
+from config_schema import ConfigError, load_config as _load_config
 
 app = Flask(__name__)
 
@@ -30,13 +31,15 @@ STATUS_HTML = """<!doctype html>
 
 
 def load_config():
-    with open(CONFIG_PATH) as f:
-        return json.load(f)
+    return _load_config(CONFIG_PATH)
 
 
 @app.route("/")
 def status():
-    config = load_config()
+    try:
+        config = load_config()
+    except ConfigError as e:
+        return f"<pre>{e}</pre>", 500
     watches = config.get("watches", [])
     if watches:
         items = "\n".join(
@@ -60,6 +63,11 @@ def cron_check():
         if auth_header != f"Bearer {cron_secret}":
             return jsonify({"error": "unauthorized"}), 401
 
+    try:
+        config = load_config()
+    except ConfigError as e:
+        return jsonify({"error": str(e)}), 500
+
     # Phase 4 (see PLAN.md) will fetch each enabled watch from its source,
     # compare against stored state, and send email on a change. For now
     # this just confirms the cron wiring works end-to-end.
@@ -67,6 +75,6 @@ def cron_check():
         {
             "ok": True,
             "checked_at": datetime.now(timezone.utc).isoformat(),
-            "watches_seen": len(load_config().get("watches", [])),
+            "watches_seen": len(config.get("watches", [])),
         }
     )

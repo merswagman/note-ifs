@@ -6,12 +6,15 @@ open.
 
 ## Current phase
 
-**Phase 1: Skeleton** — complete. Flask app deployed to Vercel
-(https://note-ifs.vercel.app), hourly checks running via GitHub Actions
-with `CRON_SECRET` enforced end-to-end. Remaining loose end: confirm
-Vercel's GitHub App has deploy-on-push access (not yet needed, since
-deploys so far are manual `vercel deploy`). Next up: Phase 2 (firm up
-config schema) and Phase 3 (email delivery).
+**Phase 2: Config schema** — complete. `config_schema.py` validates
+`config/config.json` (v1 schema, documented below) and `app.py` handles
+bad config at both routes instead of crashing. Not yet deployed to
+Vercel — local-only until the next deploy. Next up: Phase 3 (email
+delivery).
+
+Phase 1 remaining loose end: confirm Vercel's GitHub App has
+deploy-on-push access (not yet needed, since deploys so far are manual
+`vercel deploy`).
 
 ## Decisions log
 
@@ -25,6 +28,7 @@ config schema) and Phase 3 (email delivery).
 | 2026-07-14 | Entrypoint is root `app.py` with a top-level `app` Flask instance; no `builds`/`routes` in `vercel.json` | Confirmed against current Vercel docs (fetched during Phase 1): Vercel auto-detects Flask from `requirements.txt` + a supported entrypoint filename (`app.py`, `index.py`, `server.py`, `main.py`, `wsgi.py`, `asgi.py`, or the same under `src/`/`app/`/`api/`). The whole app deploys as one Vercel Function. |
 | 2026-07-14 | Cron schedule is daily (`0 13 * * *`), not every 6 hours | Hobby-plan Vercel accounts only allow cron jobs that run once per day — a `0 */6 * * *` schedule made every deploy fail instantly with `deploy_failed`, which is what caused the "error for a second, no deploy visible" symptom the user hit. Superseded same day — see next entry. |
 | 2026-07-14 | Scheduling moved entirely to a GitHub Actions workflow (`.github/workflows/hourly-check.yml`, hourly), `vercel.json`'s `crons` block removed | User wants hourly checks; Hobby-plan Vercel Cron can't go below daily and Vercel's Workflow DevKit (which could durably `sleep()` around the limit) is TypeScript/Node-only, not usable from this Flask/Python app. GitHub Actions is free, needs no new language/service, and avoids two schedulers hitting the same endpoint. Tradeoff: GitHub disables scheduled workflows after 60 days of repo inactivity, and timing can drift a few minutes under GitHub's load — acceptable for a permit check. |
+| 2026-07-15 | Config schema versioned (`version: 1`), validated by hand-rolled `config_schema.py` instead of pydantic/jsonschema | The shape is simple (one envelope + one known type so far), so a dependency wasn't justified. A `version` field is cheap now and avoids a painful migration later once chores/calendar (Phase 7) add real fields. Validation raises with *all* problems found, since this file is meant to be hand-edited by Christopher, not just machine-generated. |
 
 ## Phases
 
@@ -62,16 +66,43 @@ config schema) and Phase 3 (email delivery).
       this session — deploys so far were all manual (`vercel deploy`).
       Confirm auto-deploy on push works before relying on it.
 
-### Phase 2: Config schema
-- [x] Draft shape in place at `config/config.json`: a `watches` array of
-      `{id, type, label, enabled, params}`, with one disabled placeholder
-      entry (`type: "permit"`, `params.source: "recreation.gov"`). Not yet
-      validated against a real permit — placeholder only.
-- [ ] Firm up the schema once Phase 4's research spike shows what params a
-      real recreation.gov permit watch actually needs.
-- [ ] Add schema validation (reject malformed `config.json` at load time
-      instead of failing deep in a request) — currently `load_config()` in
-      `app.py` does a bare `json.load` with no validation.
+### Phase 2: Config schema — complete
+- [x] Schema settled (v1), documented here:
+  ```json
+  {
+    "version": 1,
+    "watches": [
+      {
+        "id": "lowercase-hyphenated-slug",
+        "type": "permit",
+        "label": "human-readable name",
+        "enabled": true,
+        "params": { "source": "recreation.gov", "permit_id": "..." }
+      }
+    ]
+  }
+  ```
+  Every watch needs `id` (unique, `^[a-z0-9]+(-[a-z0-9]+)*$`), `type` (must
+  be in `config_schema.KNOWN_WATCH_TYPES` — currently only `"permit"`;
+  extend that set, not this doc, when chores/calendar land in Phase 7),
+  `label`, `enabled` (bool), and a type-specific `params` object. For
+  `type: "permit"`, `params.source` must be in
+  `config_schema.KNOWN_PERMIT_SOURCES` (currently only `"recreation.gov"`)
+  and `params.permit_id` must be a non-empty string — exact meaning of
+  "permit_id" (facility ID vs. permit ID vs. something else) is still TBD
+  pending Phase 4's research spike; the field exists as a placeholder slot.
+- [x] Validation lives in `config_schema.py` (`validate_config`,
+      `load_config`) — hand-rolled rather than a dependency like pydantic,
+      since the shape is simple. Raises `ConfigError` with every problem
+      found (not just the first), so a hand-edited config shows all issues
+      at once. Verified against 6 malformed-config cases (missing version,
+      wrong type for `watches`, bad id format, duplicate id, unknown watch
+      type, unknown permit source/empty permit_id) — all rejected with
+      correct, specific messages.
+- [x] `app.py` now catches `ConfigError` at both routes (`/` renders a 500
+      with the error text; `/api/cron/check` returns
+      `{"error": ...}, 500`) instead of an unhandled exception — config
+      loading is a system boundary per CLAUDE.md conventions.
 
 ### Phase 3: Email delivery
 - [ ] Choose email path: SMTP with env-var credentials vs. a transactional
