@@ -6,12 +6,12 @@ open.
 
 ## Current phase
 
-**Phase 2: Config schema** — complete. `config_schema.py` validates
-`config/config.json` (v1 schema, documented below) and `app.py` handles
-bad config at both routes instead of crashing. Deployed and verified live
-at https://notifs.mersman.dev (a custom domain replaced `note-ifs.vercel.app`
-as the primary alias during this deploy — updated everywhere that
-referenced the old URL). Next up: Phase 3 (email delivery).
+**Phase 3: Email delivery** — in progress. `notifier.py`'s
+`send_notification()` (Gmail SMTP) and `send_test_email.py` are written and
+the missing-credentials error path is verified. Blocked on Christopher
+generating a Gmail app password and setting `SMTP_USERNAME`/`SMTP_PASSWORD`
+(locally + in Vercel) — see Phase 3 checklist for exact steps. Not yet
+deployed (no app.py changes this phase, so no redeploy needed yet).
 
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
@@ -31,6 +31,7 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 | 2026-07-14 | Scheduling moved entirely to a GitHub Actions workflow (`.github/workflows/hourly-check.yml`, hourly), `vercel.json`'s `crons` block removed | User wants hourly checks; Hobby-plan Vercel Cron can't go below daily and Vercel's Workflow DevKit (which could durably `sleep()` around the limit) is TypeScript/Node-only, not usable from this Flask/Python app. GitHub Actions is free, needs no new language/service, and avoids two schedulers hitting the same endpoint. Tradeoff: GitHub disables scheduled workflows after 60 days of repo inactivity, and timing can drift a few minutes under GitHub's load — acceptable for a permit check. |
 | 2026-07-15 | Config schema versioned (`version: 1`), validated by hand-rolled `config_schema.py` instead of pydantic/jsonschema | The shape is simple (one envelope + one known type so far), so a dependency wasn't justified. A `version` field is cheap now and avoids a painful migration later once chores/calendar (Phase 7) add real fields. Validation raises with *all* problems found, since this file is meant to be hand-edited by Christopher, not just machine-generated. |
 | 2026-07-15 | Canonical URL is `https://notifs.mersman.dev`, not `note-ifs.vercel.app` | Christopher added a custom domain in the Vercel dashboard (matching his other projects' `*.mersman.dev` pattern) between deploys. It became the primary alias and `note-ifs.vercel.app` stopped resolving (404) — caught because the GitHub Actions workflow was still hardcoded to the old URL and would have started failing hourly. Updated `.github/workflows/hourly-check.yml` and this doc; if the domain changes again, grep the repo for the old one before assuming it still works. |
+| 2026-07-15 | Email via Gmail SMTP (app password), not a transactional API | User preference — reuses an existing Gmail account, no new service signup. Uses stdlib `smtplib`, so no new dependency. Tradeoff accepted: Gmail SMTP is slightly more failure-prone for automated senders than a dedicated transactional API (occasional login flags), acceptable for low-volume personal notifications. |
 
 ## Phases
 
@@ -110,11 +111,27 @@ deploy-on-push access (not yet needed, since deploys so far are manual
       loading is a system boundary per CLAUDE.md conventions.
 
 ### Phase 3: Email delivery
-- [ ] Choose email path: SMTP with env-var credentials vs. a transactional
-      API (e.g. Resend/SendGrid). **Open question — see below.**
-- [ ] `send_notification(subject, body)` helper, reads credentials from
-      Vercel env vars.
-- [ ] Manual test send before wiring to real checks.
+- [x] Email path: Gmail SMTP with an app password, not a transactional API.
+      User preference — no new service signup, reuses an existing Gmail
+      account. Uses Python's stdlib `smtplib`/`ssl`/`email.message`, so no
+      new dependency in `requirements.txt`.
+- [x] `send_notification(subject, body)` helper in `notifier.py`. Reads
+      `SMTP_HOST` (default `smtp.gmail.com`), `SMTP_PORT` (default `465`,
+      SSL), `SMTP_USERNAME`/`SMTP_PASSWORD` (required, no defaults —
+      raises `EmailConfigError` if unset), and `NOTIFY_EMAIL_TO` (optional,
+      defaults to sending to `SMTP_USERNAME` itself). Verified the
+      missing-credentials path fails cleanly (`EmailConfigError`, not a
+      raw exception) via `send_test_email.py` with no env vars set.
+- [ ] **User action needed to finish this phase**: generate a Gmail app
+      password (Google Account → Security → 2-Step Verification → App
+      passwords; requires 2FA enabled) and set `SMTP_USERNAME` (the Gmail
+      address) + `SMTP_PASSWORD` (the app password) — locally (for testing)
+      and in Vercel's Production env vars (for real use). Same convention as
+      `CRON_SECRET`: Christopher sets credentials himself, Claude only
+      references them by name.
+- [ ] Manual test send with real credentials, once set — not done yet.
+- [ ] Not wired into `/api/cron/check` yet — that's Phase 4's job (checker →
+      state store → email → cron endpoint).
 
 ### Phase 4: recreation.gov permit checker
 - [ ] Research spike: confirm the actual recreation.gov endpoint(s)/response
@@ -154,8 +171,6 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 
 ## Open questions
 
-- **Email provider**: SMTP + env-var creds, or a transactional email API?
-  Affects Phase 3 implementation and required env vars.
 - **UI auth**: does the light UI need a login/shared secret, or is it fine
   as an unauthenticated Vercel URL (security through obscurity)? Matters
   once it shows real config/state.
