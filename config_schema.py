@@ -1,13 +1,14 @@
 import json
 import re
 
-CONFIG_VERSION = 1
+CONFIG_VERSION = 2
 
 # Extend this set as new watch types (chore, calendar, ...) get implemented.
 KNOWN_WATCH_TYPES = {"permit"}
 KNOWN_PERMIT_SOURCES = {"recreation.gov"}
 
 _ID_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class ConfigError(ValueError):
@@ -73,6 +74,28 @@ def validate_config(data):
             permit_id = params.get("permit_id")
             if not isinstance(permit_id, str) or not permit_id:
                 errors.append(f"{prefix}.params.permit_id must be a non-empty string")
+
+            division_ids = params.get("division_ids")
+            if (
+                not isinstance(division_ids, list)
+                or not division_ids
+                or not all(isinstance(d, str) and d for d in division_ids)
+            ):
+                errors.append(
+                    f"{prefix}.params.division_ids must be a non-empty list of "
+                    f"non-empty strings"
+                )
+
+            dates = params.get("dates")
+            if (
+                not isinstance(dates, list)
+                or not dates
+                or not all(isinstance(d, str) and _DATE_PATTERN.match(d) for d in dates)
+            ):
+                errors.append(
+                    f"{prefix}.params.dates must be a non-empty list of "
+                    f'"YYYY-MM-DD" strings'
+                )
 
     if errors:
         raise ConfigError("Invalid config.json:\n  - " + "\n  - ".join(errors))

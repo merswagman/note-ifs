@@ -1,14 +1,26 @@
 {
-  "version": 1,
+  "version": 2,
   "watches": [
     {
-      "id": "example-permit",
+      "id": "capitol-lake-2026-07-18",
       "type": "permit",
-      "label": "Example wilderness permit (placeholder, not a real watch yet)",
-      "enabled": false,
+      "label": "Capitol Lake (Maroon Bells-Snowmass Wilderness) overnight permit, July 18 2026",
+      "enabled": true,
       "params": {
         "source": "recreation.gov",
-        "permit_id": "TBD"
+        "permit_id": "4675333",
+        "division_ids": [
+          "4675333030",
+          "4675333031",
+          "4675333032",
+          "4675333033",
+          "4675333034",
+          "4675333035",
+          "4675333036",
+          "4675333037",
+          "4675333038"
+        ],
+        "dates": ["2026-07-18"]
       }
     }
   ]

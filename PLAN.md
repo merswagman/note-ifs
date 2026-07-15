@@ -6,13 +6,14 @@ open.
 
 ## Current phase
 
-**Phase 3: Email delivery** — complete. `notifier.py`'s
-`send_notification()` (Gmail SMTP) sent a real test email successfully,
-confirmed received. Credentials are set in both fish config (local) and
-Vercel (Preview + Production). Not wired into `/api/cron/check` yet — that's
-Phase 4, next up: the recreation.gov permit checker itself, which will wire
-checker → state store (Phase 5) → email (this phase) → cron endpoint
-(Phase 1).
+**Phase 4: recreation.gov permit checker** — checker built and verified
+against live data; not yet wired to send real emails. `permit_checker.py`
+correctly fetches recreation.gov and reports availability for the real
+first watch (Capitol Lake, Maroon Bells-Snowmass Wilderness, 2026-07-18 —
+currently no openings across all 9 sites). Deliberately not wired into
+`/api/cron/check` yet: doing so before Phase 5 exists would either miss
+repeat availability or spam an email every hour it stays open. Next up:
+Phase 5 (state persistence), which unblocks the final wiring.
 
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
@@ -33,6 +34,9 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 | 2026-07-15 | Config schema versioned (`version: 1`), validated by hand-rolled `config_schema.py` instead of pydantic/jsonschema | The shape is simple (one envelope + one known type so far), so a dependency wasn't justified. A `version` field is cheap now and avoids a painful migration later once chores/calendar (Phase 7) add real fields. Validation raises with *all* problems found, since this file is meant to be hand-edited by Christopher, not just machine-generated. |
 | 2026-07-15 | Canonical URL is `https://notifs.mersman.dev`, not `note-ifs.vercel.app` | Christopher added a custom domain in the Vercel dashboard (matching his other projects' `*.mersman.dev` pattern) between deploys. It became the primary alias and `note-ifs.vercel.app` stopped resolving (404) — caught because the GitHub Actions workflow was still hardcoded to the old URL and would have started failing hourly. Updated `.github/workflows/hourly-check.yml` and this doc; if the domain changes again, grep the repo for the old one before assuming it still works. |
 | 2026-07-15 | Email via Gmail SMTP (app password), not a transactional API | User preference — reuses an existing Gmail account, no new service signup. Uses stdlib `smtplib`, so no new dependency. Tradeoff accepted: Gmail SMTP is slightly more failure-prone for automated senders than a dedicated transactional API (occasional login flags), acceptable for low-volume personal notifications. |
+| 2026-07-15 | recreation.gov availability endpoint confirmed as `/api/permititinerary/{permit_id}/division/{division_id}/availability/month` | Found via Phase 4's research spike (grepping the permit page's JS bundle), not assumed — see Phase 4 section for the full contract, User-Agent gotcha, and the Capitol Lake multi-division finding. |
+| 2026-07-15 | Config schema bumped v1 → v2: `permit` params gained required `division_ids` and `dates` | The v1 shape (just `permit_id`) couldn't express which zone/date to check — discovered once the research spike showed a permit has multiple independently-quota'd divisions. Real breaking change to the only existing config entry, which was rewritten (not migrated) since there's a single user and no back-compat need. |
+| 2026-07-15 | Added `requests` as a dependency | `permit_checker.py` needs custom headers (User-Agent workaround) and clean error handling against recreation.gov; stdlib `urllib` would work but be noticeably more verbose for this. First non-Flask dependency in the project. |
 
 ## Phases
 
@@ -73,18 +77,23 @@ deploy-on-push access (not yet needed, since deploys so far are manual
       this session — deploys so far were all manual (`vercel deploy`).
       Confirm auto-deploy on push works before relying on it.
 
-### Phase 2: Config schema — complete
-- [x] Schema settled (v1), documented here:
+### Phase 2: Config schema — complete (updated to v2 during Phase 4)
+- [x] Schema (v2), documented here:
   ```json
   {
-    "version": 1,
+    "version": 2,
     "watches": [
       {
         "id": "lowercase-hyphenated-slug",
         "type": "permit",
         "label": "human-readable name",
         "enabled": true,
-        "params": { "source": "recreation.gov", "permit_id": "..." }
+        "params": {
+          "source": "recreation.gov",
+          "permit_id": "4675333",
+          "division_ids": ["4675333030", "..."],
+          "dates": ["2026-07-18"]
+        }
       }
     ]
   }
@@ -94,10 +103,14 @@ deploy-on-push access (not yet needed, since deploys so far are manual
   extend that set, not this doc, when chores/calendar land in Phase 7),
   `label`, `enabled` (bool), and a type-specific `params` object. For
   `type: "permit"`, `params.source` must be in
-  `config_schema.KNOWN_PERMIT_SOURCES` (currently only `"recreation.gov"`)
-  and `params.permit_id` must be a non-empty string — exact meaning of
-  "permit_id" (facility ID vs. permit ID vs. something else) is still TBD
-  pending Phase 4's research spike; the field exists as a placeholder slot.
+  `config_schema.KNOWN_PERMIT_SOURCES` (currently only `"recreation.gov"`),
+  `params.permit_id` is recreation.gov's permit ID (from the permit's URL,
+  e.g. `/permits/4675333/...`), `params.division_ids` is a non-empty list of
+  that permit's division/zone/site IDs to check (a "zone" can be several
+  numbered divisions — see Phase 4's research spike), and `params.dates` is
+  a non-empty list of `"YYYY-MM-DD"` strings. Bumped from v1 → v2 because
+  the old `permit_id`-only shape couldn't express *which* division/date to
+  actually check — a real breaking change, not an additive one.
 - [x] Validation lives in `config_schema.py` (`validate_config`,
       `load_config`) — hand-rolled rather than a dependency like pydantic,
       since the shape is simple. Raises `ConfigError` with every problem
@@ -136,15 +149,44 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 here by design.
 
 ### Phase 4: recreation.gov permit checker
-- [ ] Research spike: confirm the actual recreation.gov endpoint(s)/response
-      shape for permit availability (undocumented API — verify against real
-      traffic, don't assume). Record findings here.
-- [ ] Implement a checker for one configured permit: fetch availability,
-      compare against last-known state, return "changed: yes/no" + details.
+- [x] Research spike (2026-07-15), confirmed against live traffic, not
+      assumed:
+  - The permit detail page (`/permits/{permit_id}/registration/detailed-availability`)
+    is a client-rendered SPA with no useful server HTML — the real data comes
+    from `GET https://www.recreation.gov/api/permititinerary/{permit_id}/division/{division_id}/availability/month?month={M}&year={YYYY}&commercial=false`,
+    found by pulling the page's JS bundle and grepping for the `On(...)` URL
+    builder around `division/${a}/availability/month`.
+  - Response shape: `{"payload": {"bools": {"YYYY-MM-DD": bool, ...}, "quota_type_maps": {"ConstantQuotaUsageDaily": {"YYYY-MM-DD": {"total": int, "remaining": int, "show_walkup": bool, "is_hidden": bool, "season_type": str}, ...}}}}`.
+    Confirmed `bools[date] == (remaining > 0)` exactly, by cross-checking a
+    date with `remaining: 1` against a batch of `remaining: 0` dates.
+  - **The default `python-requests` User-Agent gets a 403** (recreation.gov's
+    WAF blocks known bot signatures); an empty UA or a browser-like UA both
+    get 200. `permit_checker.py` sends a browser-like UA to be safe against
+    future tightening.
+  - A permit has multiple "divisions" (zones/campsites) under
+    `/api/permitcontent/{permit_id}`'s `divisions` map. For permit `4675333`
+    (Maroon Bells-Snowmass Wilderness), the "Capitol Lake" zone is actually
+    9 separate divisions (`4675333030`–`4675333038`, "Capitol Lake Site
+    1"–"9"), each with its own independent quota. A "Capitol Lake" watch
+    needs to check all 9 and report if *any* has `remaining > 0` — assumed
+    that's what "Capitol Lake permits" means (any site in the zone), not one
+    specific numbered site. **Flag to Christopher if that assumption is
+    wrong.**
+- [x] `permit_checker.py`'s `check_permit_watch(watch)` fetches all
+      `division_ids` × `dates` from a watch's params and returns
+      `{date: {division_id: remaining_count}}` for only the combinations
+      currently available. Verified against live data both ways: the
+      current real target (Capitol Lake, 2026-07-18) correctly returns `{}`
+      (all 9 sites show `remaining: 0` right now), and a synthetic check
+      against known-open September 2026 dates correctly returned the
+      available date/division/count.
+- [ ] Compare against last-known state — blocked on Phase 5 (no persistent
+      state store yet).
 - [ ] Wire checker → state store (Phase 5) → email (Phase 3) → cron endpoint
-      (Phase 1).
-- [ ] Confirm end-to-end with a real permit ID that has some availability
-      signal to test against.
+      (Phase 1) — not done. Deliberately not wiring the checker into
+      `/api/cron/check` yet: without Phase 5's "already notified" state, an
+      hourly cron run would either do nothing on repeat availability or
+      email the same opening every hour until it's booked. Phase 5 first.
 
 ### Phase 5: Runtime state persistence
 - [ ] Pick primitive: Vercel Blob (simple JSON blob mirroring config shape)
