@@ -19,6 +19,7 @@ and run locally; not yet deployed to Vercel.
 | 2026-07-14 | First check: recreation.gov permits | User's starting use case. |
 | 2026-07-14 | Config = JSON file committed to repo; runtime state = Vercel Blob/KV | Vercel's filesystem is read-only at runtime, so a repo JSON file can't hold mutable "already notified" state. Splitting static config from mutable state keeps the "JSON database" mental model while actually working on Vercel. |
 | 2026-07-14 | Entrypoint is root `app.py` with a top-level `app` Flask instance; no `builds`/`routes` in `vercel.json` | Confirmed against current Vercel docs (fetched during Phase 1): Vercel auto-detects Flask from `requirements.txt` + a supported entrypoint filename (`app.py`, `index.py`, `server.py`, `main.py`, `wsgi.py`, `asgi.py`, or the same under `src/`/`app/`/`api/`). The whole app deploys as one Vercel Function. |
+| 2026-07-14 | Cron schedule is daily (`0 13 * * *`), not every 6 hours | Hobby-plan Vercel accounts only allow cron jobs that run once per day — a `0 */6 * * *` schedule made every deploy fail instantly with `deploy_failed`, which is what caused the "error for a second, no deploy visible" symptom the user hit. Revisit if the account moves to Pro and more frequent permit checks are wanted. |
 
 ## Phases
 
@@ -36,9 +37,19 @@ and run locally; not yet deployed to Vercel.
 - [x] `vercel.json` `crons` entry wired to `/api/cron/check` every 6 hours.
 - [x] Verified locally with Flask's test client (`/` and `/api/cron/check`
       both return 200).
-- [ ] Deployed to Vercel and confirmed reachable (needs a Vercel project
-      link — not done yet, no Vercel project/token configured in this
-      session).
+- [x] Deployed to Vercel and confirmed reachable: https://note-ifs.vercel.app
+      — both `/` and `/api/cron/check` return 200 in production.
+- [ ] Set a `CRON_SECRET` env var in the Vercel project. Right now
+      `/api/cron/check` has no secret configured, so the auth check in
+      `app.py` is a no-op and the endpoint is open to anyone — fine while it
+      only reports "ran", but must be set before Phase 4 makes it do real
+      work.
+- [ ] Confirm the Vercel GitHub App actually has install access to
+      `merswagman/note-ifs` (Vercel dashboard → Settings → Git, or GitHub →
+      Settings → Applications → Vercel). The project's Git connection is
+      registered, but no deployment was ever auto-triggered by a push in
+      this session — deploys so far were all manual (`vercel deploy`).
+      Confirm auto-deploy on push works before relying on it.
 
 ### Phase 2: Config schema
 - [x] Draft shape in place at `config/config.json`: a `watches` array of
