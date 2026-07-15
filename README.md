@@ -10,17 +10,28 @@ next.
 ## Stack
 
 - **App**: Python + Flask
-- **Hosting**: Vercel (Python serverless functions, Vercel Cron for scheduled checks)
+- **Hosting**: Vercel (Python serverless functions)
+- **Scheduling**: a GitHub Actions workflow (`.github/workflows/hourly-check.yml`)
+  calls the app hourly — Vercel's own Cron is Hobby-plan-limited to once/day,
+  so it isn't used
 - **Config**: a JSON file committed to the repo, defining what to watch (permits, later chores/calendar)
-- **Runtime state** (last-checked time, already-notified flags): Vercel Blob/KV, since Vercel's filesystem is read-only at runtime
-- **Delivery**: email
+- **Runtime state** (last-checked time, already-notified flags): Vercel Blob/KV (not yet built), since Vercel's filesystem is read-only at runtime
+- **Delivery**: email (not yet built)
 
 ## Status
 
-This project is in early planning/scaffolding. See [PLAN.md](PLAN.md) for the
-phased implementation plan and current progress, and [CLAUDE.md](CLAUDE.md)
-for architecture and working conventions.
+Live at https://notifs.mersman.dev. Phases 1 (skeleton) and 2 (config schema)
+are done; see [PLAN.md](PLAN.md) for the phased implementation plan and
+current progress, and [CLAUDE.md](CLAUDE.md) for architecture and working
+conventions.
 
 ## Quick start
 
-Not yet runnable — see PLAN.md Phase 1 for the first working skeleton.
+```
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -c "from app import app; app.run(debug=True)"
+```
+
+Deploying: `vercel deploy` (preview) or `vercel deploy --prod` (production),
+via `npx vercel@latest` if the CLI isn't installed globally.

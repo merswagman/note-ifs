@@ -8,9 +8,10 @@ open.
 
 **Phase 2: Config schema** — complete. `config_schema.py` validates
 `config/config.json` (v1 schema, documented below) and `app.py` handles
-bad config at both routes instead of crashing. Not yet deployed to
-Vercel — local-only until the next deploy. Next up: Phase 3 (email
-delivery).
+bad config at both routes instead of crashing. Deployed and verified live
+at https://notifs.mersman.dev (a custom domain replaced `note-ifs.vercel.app`
+as the primary alias during this deploy — updated everywhere that
+referenced the old URL). Next up: Phase 3 (email delivery).
 
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
@@ -29,6 +30,7 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 | 2026-07-14 | Cron schedule is daily (`0 13 * * *`), not every 6 hours | Hobby-plan Vercel accounts only allow cron jobs that run once per day — a `0 */6 * * *` schedule made every deploy fail instantly with `deploy_failed`, which is what caused the "error for a second, no deploy visible" symptom the user hit. Superseded same day — see next entry. |
 | 2026-07-14 | Scheduling moved entirely to a GitHub Actions workflow (`.github/workflows/hourly-check.yml`, hourly), `vercel.json`'s `crons` block removed | User wants hourly checks; Hobby-plan Vercel Cron can't go below daily and Vercel's Workflow DevKit (which could durably `sleep()` around the limit) is TypeScript/Node-only, not usable from this Flask/Python app. GitHub Actions is free, needs no new language/service, and avoids two schedulers hitting the same endpoint. Tradeoff: GitHub disables scheduled workflows after 60 days of repo inactivity, and timing can drift a few minutes under GitHub's load — acceptable for a permit check. |
 | 2026-07-15 | Config schema versioned (`version: 1`), validated by hand-rolled `config_schema.py` instead of pydantic/jsonschema | The shape is simple (one envelope + one known type so far), so a dependency wasn't justified. A `version` field is cheap now and avoids a painful migration later once chores/calendar (Phase 7) add real fields. Validation raises with *all* problems found, since this file is meant to be hand-edited by Christopher, not just machine-generated. |
+| 2026-07-15 | Canonical URL is `https://notifs.mersman.dev`, not `note-ifs.vercel.app` | Christopher added a custom domain in the Vercel dashboard (matching his other projects' `*.mersman.dev` pattern) between deploys. It became the primary alias and `note-ifs.vercel.app` stopped resolving (404) — caught because the GitHub Actions workflow was still hardcoded to the old URL and would have started failing hourly. Updated `.github/workflows/hourly-check.yml` and this doc; if the domain changes again, grep the repo for the old one before assuming it still works. |
 
 ## Phases
 
@@ -49,7 +51,10 @@ deploy-on-push access (not yet needed, since deploys so far are manual
       decisions log).
 - [x] Verified locally with Flask's test client (`/` and `/api/cron/check`
       both return 200).
-- [x] Deployed to Vercel and confirmed reachable: https://note-ifs.vercel.app
+- [x] Deployed to Vercel and confirmed reachable: https://notifs.mersman.dev
+      (custom domain; the default `note-ifs.vercel.app` stopped resolving
+      once this was set up as the primary alias — see 2026-07-15 decisions
+      log entry)
       — both `/` and `/api/cron/check` return 200 in production.
 - [x] `CRON_SECRET` set by Christopher in both Vercel (Production env var)
       and GitHub Actions repo secrets — confirmed enforced: unauthenticated

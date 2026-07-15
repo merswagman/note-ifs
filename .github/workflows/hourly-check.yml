@@ -11,5 +11,5 @@ jobs:
     steps:
       - name: Call /api/cron/check
         run: |
-          curl -sf -X POST https://note-ifs.vercel.app/api/cron/check \
+          curl -sf -X POST https://notifs.mersman.dev/api/cron/check \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
