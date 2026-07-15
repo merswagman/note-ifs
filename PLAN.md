@@ -6,12 +6,13 @@ open.
 
 ## Current phase
 
-**Phase 3: Email delivery** — in progress. `notifier.py`'s
-`send_notification()` (Gmail SMTP) and `send_test_email.py` are written and
-the missing-credentials error path is verified. Blocked on Christopher
-generating a Gmail app password and setting `SMTP_USERNAME`/`SMTP_PASSWORD`
-(locally + in Vercel) — see Phase 3 checklist for exact steps. Not yet
-deployed (no app.py changes this phase, so no redeploy needed yet).
+**Phase 3: Email delivery** — complete. `notifier.py`'s
+`send_notification()` (Gmail SMTP) sent a real test email successfully,
+confirmed received. Credentials are set in both fish config (local) and
+Vercel (Preview + Production). Not wired into `/api/cron/check` yet — that's
+Phase 4, next up: the recreation.gov permit checker itself, which will wire
+checker → state store (Phase 5) → email (this phase) → cron endpoint
+(Phase 1).
 
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
@@ -122,16 +123,17 @@ deploy-on-push access (not yet needed, since deploys so far are manual
       defaults to sending to `SMTP_USERNAME` itself). Verified the
       missing-credentials path fails cleanly (`EmailConfigError`, not a
       raw exception) via `send_test_email.py` with no env vars set.
-- [ ] **User action needed to finish this phase**: generate a Gmail app
-      password (Google Account → Security → 2-Step Verification → App
-      passwords; requires 2FA enabled) and set `SMTP_USERNAME` (the Gmail
-      address) + `SMTP_PASSWORD` (the app password) — locally (for testing)
-      and in Vercel's Production env vars (for real use). Same convention as
-      `CRON_SECRET`: Christopher sets credentials himself, Claude only
-      references them by name.
-- [ ] Manual test send with real credentials, once set — not done yet.
+- [x] `SMTP_USERNAME`/`SMTP_PASSWORD` set by Christopher (Gmail app
+      password) — both locally (fish config) and in Vercel (Preview +
+      Production env vars), confirmed via `vercel env ls`.
+- [x] Manual test send with real credentials: `send_test_email.py` run
+      locally (via `fish -c` so the env vars were inherited) sent
+      successfully, and Christopher confirmed the email actually arrived.
 - [ ] Not wired into `/api/cron/check` yet — that's Phase 4's job (checker →
       state store → email → cron endpoint).
+
+**Phase 3 complete** except for the Phase-4 wiring, which is out of scope
+here by design.
 
 ### Phase 4: recreation.gov permit checker
 - [ ] Research spike: confirm the actual recreation.gov endpoint(s)/response
