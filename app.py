@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, request
 
@@ -20,6 +21,10 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "config.json")
 # There's no persisted "last checked" time (see PLAN.md Phase 5), so this is
 # computed from the known cron schedule rather than tracked state.
 CRON_MINUTE_PAST_HOUR = 17
+
+# Displayed time zone for the status page's "Next check" field. Use a named
+# zone (not a fixed UTC offset) so MST/MDT is handled automatically.
+DISPLAY_TZ = ZoneInfo("America/Denver")
 
 STATUS_HTML = """<!doctype html>
 <html>
@@ -186,7 +191,7 @@ def status():
         )
     else:
         items = '<p class="empty">No watches configured.</p>'
-    next_check = next_check_time().strftime("%Y-%m-%d %H:%M UTC")
+    next_check = next_check_time().astimezone(DISPLAY_TZ).strftime("%Y-%m-%d %H:%M %Z")
     return STATUS_HTML.format(watch_list=items, next_check=next_check)
 
 
