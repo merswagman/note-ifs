@@ -4,7 +4,7 @@
     {
       "id": "capitol-lake-2026-08-21",
       "type": "permit",
-      "label": "Capitol Lake (Maroon Bells-Snowmass Wilderness) overnight permit, Aug 21-22 2026",
+      "label": "Capitol Lake (Maroon Bells-Snowmass Wilderness) overnight permit, Aug 22 2026",
       "enabled": true,
       "params": {
         "source": "recreation.gov",
@@ -20,7 +20,7 @@
           "4675333037",
           "4675333038"
         ],
-        "dates": ["2026-08-21", "2026-08-22"]
+        "dates": ["2026-08-22"]
       }
     },
     {
