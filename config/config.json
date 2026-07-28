@@ -42,7 +42,7 @@
       "id": "friend-campgrounds-2026-08-07",
       "type": "campground",
       "label": "Riverside/Cove/Spillway/Springer Gulch campgrounds, Aug 7-9 2026",
-      "enabled": true,
+      "enabled": false,
       "notify_to": "matthewhale1090@gmail.com",
       "params": {
         "source": "recreation.gov",
