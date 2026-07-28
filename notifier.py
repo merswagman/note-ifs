@@ -15,12 +15,12 @@ def _required_env(name):
     return value
 
 
-def send_notification(subject: str, body: str) -> None:
+def send_notification(subject: str, body: str, to_addr: str | None = None) -> None:
     host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("SMTP_PORT", "465"))
     username = _required_env("SMTP_USERNAME")
     password = _required_env("SMTP_PASSWORD")
-    to_addr = os.environ.get("NOTIFY_EMAIL_TO", username)
+    to_addr = to_addr or os.environ.get("NOTIFY_EMAIL_TO", username)
 
     message = EmailMessage()
     message["Subject"] = subject

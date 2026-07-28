@@ -4,15 +4,24 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, jsonify, request
 
+from campground_checker import CampgroundCheckError, check_campground_watch
+from campground_checker import format_lines as format_campground_lines
 from config_schema import ConfigError, load_config as _load_config
 from notifier import EmailConfigError, send_notification
-from permit_checker import PermitCheckError, check_permit_watch, registration_url
+from permit_checker import PermitCheckError, check_permit_watch
+from permit_checker import format_lines as format_permit_lines
 
 app = Flask(__name__)
 
 # Extend this as new watch types (chore, calendar, ...) get their own checker.
 CHECKERS = {
     "permit": check_permit_watch,
+    "campground": check_campground_watch,
+}
+CHECK_ERRORS = (PermitCheckError, CampgroundCheckError)
+EMAIL_FORMATTERS = {
+    "permit": format_permit_lines,
+    "campground": format_campground_lines,
 }
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config", "config.json")
@@ -221,7 +230,7 @@ def cron_check():
 
         try:
             availability = checker(watch)
-        except PermitCheckError as e:
+        except CHECK_ERRORS as e:
             results.append({"id": watch["id"], "error": str(e)})
             continue
 
@@ -230,19 +239,12 @@ def cron_check():
 
         if availability:
             lines = [f"{watch['label']} ({watch['id']})", ""]
-            for date, by_division in sorted(availability.items()):
-                if watch["type"] == "permit":
-                    permit_id = watch["params"]["permit_id"]
-                    lines.append(f"{date}: {registration_url(permit_id, date)}")
-                else:
-                    lines.append(f"{date}:")
-                for division_id, remaining in sorted(by_division.items()):
-                    lines.append(f"  division {division_id} -- {remaining} remaining")
-                lines.append("")
+            lines.extend(EMAIL_FORMATTERS[watch["type"]](watch, availability))
             try:
                 send_notification(
                     f"note-ifs: availability found -- {watch['label']}",
                     "\n".join(lines),
+                    to_addr=watch.get("notify_to"),
                 )
             except EmailConfigError as e:
                 result["email_error"] = str(e)

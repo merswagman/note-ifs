@@ -78,3 +78,15 @@ def check_permit_watch(watch):
                 available.setdefault(date, {})[division_id] = remaining
 
     return available
+
+
+def format_lines(watch, availability):
+    """Email body lines for a permit watch's availability results."""
+    permit_id = watch["params"]["permit_id"]
+    lines = []
+    for date, by_division in sorted(availability.items()):
+        lines.append(f"{date}: {registration_url(permit_id, date)}")
+        for division_id, remaining in sorted(by_division.items()):
+            lines.append(f"  division {division_id} -- {remaining} remaining")
+        lines.append("")
+    return lines

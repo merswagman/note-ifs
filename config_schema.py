@@ -4,11 +4,13 @@ import re
 CONFIG_VERSION = 2
 
 # Extend this set as new watch types (chore, calendar, ...) get implemented.
-KNOWN_WATCH_TYPES = {"permit"}
+KNOWN_WATCH_TYPES = {"permit", "campground"}
 KNOWN_PERMIT_SOURCES = {"recreation.gov"}
+KNOWN_CAMPGROUND_SOURCES = {"recreation.gov"}
 
 _ID_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class ConfigError(ValueError):
@@ -61,6 +63,13 @@ def validate_config(data):
         if not isinstance(watch.get("enabled"), bool):
             errors.append(f"{prefix}.enabled must be a boolean")
 
+        if "notify_to" in watch:
+            notify_to = watch.get("notify_to")
+            if not isinstance(notify_to, str) or not _EMAIL_PATTERN.match(notify_to):
+                errors.append(
+                    f"{prefix}.notify_to must be a valid email address, got {notify_to!r}"
+                )
+
         params = watch.get("params")
         if not isinstance(params, dict):
             errors.append(f"{prefix}.params must be an object")
@@ -83,6 +92,35 @@ def validate_config(data):
             ):
                 errors.append(
                     f"{prefix}.params.division_ids must be a non-empty list of "
+                    f"non-empty strings"
+                )
+
+            dates = params.get("dates")
+            if (
+                not isinstance(dates, list)
+                or not dates
+                or not all(isinstance(d, str) and _DATE_PATTERN.match(d) for d in dates)
+            ):
+                errors.append(
+                    f"{prefix}.params.dates must be a non-empty list of "
+                    f'"YYYY-MM-DD" strings'
+                )
+        elif watch_type == "campground":
+            source = params.get("source")
+            if source not in KNOWN_CAMPGROUND_SOURCES:
+                errors.append(
+                    f"{prefix}.params.source must be one of "
+                    f"{sorted(KNOWN_CAMPGROUND_SOURCES)}, got {source!r}"
+                )
+
+            campground_ids = params.get("campground_ids")
+            if (
+                not isinstance(campground_ids, list)
+                or not campground_ids
+                or not all(isinstance(c, str) and c for c in campground_ids)
+            ):
+                errors.append(
+                    f"{prefix}.params.campground_ids must be a non-empty list of "
                     f"non-empty strings"
                 )
 

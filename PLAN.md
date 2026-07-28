@@ -14,6 +14,17 @@ by screenshotting the Flask dev server with headless Chromium — not yet
 redeployed to Vercel. Do that next. Phase 5 (state persistence) remains on
 hold by explicit user choice.
 
+**Phase 8 (multi-recipient / second user)** started and mostly built
+2026-07-27: a friend wants his own watches emailed to his own address
+instead of Christopher's, for 4 campgrounds (not a wilderness permit) he's
+watching. Built and verified against live data: per-watch `notify_to`
+email routing, a new `campground` watch type + `campground_checker.py`
+(recreation.gov's campground API is a different shape from the permit
+itinerary API — confirmed via a research spike, not assumed), and
+`app.py` generalized to dispatch email formatting per watch type. Only
+remaining blocker: the friend's email address, to fill in a draft config
+entry that's otherwise ready to commit (see Phase 8 section below).
+
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
 `vercel deploy`).
@@ -38,6 +49,7 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 | 2026-07-15 | Added `requests` as a dependency | `permit_checker.py` needs custom headers (User-Agent workaround) and clean error handling against recreation.gov; stdlib `urllib` would work but be noticeably more verbose for this. First non-Flask dependency in the project. |
 | 2026-07-15 | Phase 5 (dedup/state persistence) deliberately skipped for now; checker wired straight to email | User's explicit call: "we can hold off on the persistence... I think I want to be spammed by it for now. (but only email me when there's availability and not when there's not)." So `/api/cron/check` re-checks and re-emails every hour availability persists, with no memory of previous runs. Revisit Phase 5 only if this becomes annoying in practice. |
 | 2026-07-15 | Status page shows a computed "next check" time, not a tracked "last checked" time | A real last-checked timestamp needs persisted state (same blocker as Phase 5, still on hold); the next scheduled run is fully derivable from the known GitHub Actions cron schedule (`17 * * * *`) with no storage needed. Must be kept in sync by hand with the workflow file if the schedule changes — there's a pointer comment in `app.py` at `CRON_MINUTE_PAST_HOUR`. |
+| 2026-07-27 | Multi-recipient routing is a per-watch optional `notify_to` field, not a top-level "users" concept, and not a bump to `CONFIG_VERSION` | A friend now wants his own permit/campground watches emailed to his own address. Per-watch is the smallest change that fits the existing flat `watches` list — no new top-level structure needed, and every existing watch still validates unchanged (field is optional, falls back to `NOTIFY_EMAIL_TO`/`SMTP_USERNAME` exactly as before), so per CLAUDE.md's own rule this is additive, not a breaking schema change. Revisit if a real multi-user concept (per-user watch grouping, per-user status page filtering) becomes worth it — not needed yet for one friend and a handful of watches. |
 
 ## Phases
 
@@ -89,6 +101,7 @@ deploy-on-push access (not yet needed, since deploys so far are manual
         "type": "permit",
         "label": "human-readable name",
         "enabled": true,
+        "notify_to": "optional-override@example.com",
         "params": {
           "source": "recreation.gov",
           "permit_id": "4675333",
@@ -102,7 +115,11 @@ deploy-on-push access (not yet needed, since deploys so far are manual
   Every watch needs `id` (unique, `^[a-z0-9]+(-[a-z0-9]+)*$`), `type` (must
   be in `config_schema.KNOWN_WATCH_TYPES` — currently only `"permit"`;
   extend that set, not this doc, when chores/calendar land in Phase 7),
-  `label`, `enabled` (bool), and a type-specific `params` object. For
+  `label`, `enabled` (bool), and a type-specific `params` object.
+  `notify_to` is optional (added Phase 8, 2026-07-27) — a valid-looking
+  email string that overrides where *this watch's* availability emails go;
+  omitted means fall back to `NOTIFY_EMAIL_TO`/`SMTP_USERNAME` as before,
+  so every pre-existing watch is unaffected. For
   `type: "permit"`, `params.source` must be in
   `config_schema.KNOWN_PERMIT_SOURCES` (currently only `"recreation.gov"`),
   `params.permit_id` is recreation.gov's permit ID (from the permit's URL,
@@ -248,6 +265,69 @@ User explicitly chose repeat/duplicate emails over building this now (see
       already fit (only do this once there are 2+ real check types, not
       preemptively).
 
+### Phase 8: Multi-recipient (second user) — in progress
+- [x] `notify_to` optional per-watch field: schema validation
+      (`config_schema.py`, simple email-shape regex), `notifier.py`'s
+      `send_notification` takes an optional `to_addr` override, `app.py`'s
+      cron loop passes `watch.get("notify_to")` through. No `CONFIG_VERSION`
+      bump (additive/backward-compatible, see 2026-07-27 decisions log).
+      Verified end-to-end via `app.test_client()` against the real
+      `/api/cron/check` path (real SMTP creds, real CRON_SECRET, live
+      recreation.gov data) — 200 OK, both existing permit watches checked
+      correctly, no regression.
+- [x] Research spike (2026-07-27), confirmed against live traffic via
+      `curl` with the same browser-like User-Agent workaround as Phase 4,
+      not assumed:
+  - Per-site month availability: `GET https://www.recreation.gov/api/camps/availability/campground/{facility_id}/month?start_date={YYYY-MM}-01T00:00:00.000Z`.
+    Response: `{"campsites": {"{campsite_id}": {"site": str, "loop": str, "campsite_reserve_type": str, "availabilities": {"YYYY-MM-DDT00:00:00Z": "Available"|"Reserved"|..., ...}, "quantities": {...}, ...}, ...}, "count": int}`.
+    A date/site is open when `availabilities[date] == "Available"` (cross-checked against `quantities` being `1` for the same key).
+  - Facility metadata (name etc.): `GET https://www.recreation.gov/api/camps/campgrounds/{facility_id}` →
+    `{"campground": {"facility_name": str, "parent_asset_id": str, ...}}`.
+    Not currently used by the checker (label comes from config), but useful
+    for building config entries by hand.
+  - This is a genuinely different API from the permit itinerary one (Phase
+    4) — different base path (`/api/camps/...` vs `/api/permititinerary/...`),
+    different auth-window behavior, and per-site rather than per-division
+    results. Confirmed the four campgrounds Christopher's friend asked
+    about are real, live facility IDs: `233720` (Riverside), `233722`
+    (Cove Campground), `233721` (Spillway Campground), `233718` (Springer
+    Gulch) — all share `parent_asset_id: "1053"` (same park/area).
+- [x] `campground_checker.py` added, mirroring `permit_checker.py`'s shape:
+      `check_campground_watch(watch)` takes `params.campground_ids` +
+      `params.dates`, returns
+      `{date: {campground_id: [{"campsite_id", "site", "loop"}, ...]}}` for
+      only the available combinations. `format_lines(watch, availability)`
+      builds the email body section for this type. Verified against live
+      data both ways: the friend's actual target (4 campgrounds, 8/7 and
+      8/8/2026) currently correctly returns `{}` (nothing open yet), and a
+      known-open date (233720, 2026-08-04) correctly returned real site
+      numbers/loops.
+- [x] `type: "campground"` added to `KNOWN_WATCH_TYPES` in
+      `config_schema.py`, with `params.source` (must be
+      `KNOWN_CAMPGROUND_SOURCES`, currently just `"recreation.gov"`),
+      `params.campground_ids` (non-empty list of non-empty strings), and
+      `params.dates` (same `"YYYY-MM-DD"` list shape as permit). No
+      `CONFIG_VERSION` bump — a new watch `type` is additive, existing
+      watches unaffected, same reasoning as the `notify_to` field above.
+- [x] `app.py` generalized: `CHECKERS`/`EMAIL_FORMATTERS` are now
+      per-type dicts (`{"permit": ..., "campground": ...}`) instead of the
+      old permit-shaped-only email-building code — done in the same change
+      since the old code only knew how to format permit results. Verified
+      no regression via the same `/api/cron/check` real-data test above.
+- [x] Friend's email (matthewhale1090@gmail.com) added as `notify_to` on a
+      new `friend-campgrounds-2026-08-07` watch in `config/config.json`
+      (campground_ids `233720`/`233722`/`233721`/`233718`, dates
+      `2026-08-07`/`2026-08-08`/`2026-08-09` — extended from 2 to 3 dates
+      2026-07-28 at his request). Verified end-to-end via the real
+      `/api/cron/check` path: config loads, all 3 watches (his + Christopher's
+      2 permit watches) get checked in one run, 200 OK, no email sent since
+      nothing's available yet at any of the 4 campgrounds for those dates.
+      Runs automatically on the existing hourly GitHub Actions schedule —
+      no separate scheduling needed for a second recipient.
+- [ ] Confirm with Christopher whether the friend should also be able to
+      see the status page (`/`) — currently unauthenticated, shows all
+      watches from everyone, no per-user filtering.
+
 ## Open questions
 
 - **UI auth**: does the light UI need a login/shared secret, or is it fine
@@ -255,6 +335,8 @@ User explicitly chose repeat/duplicate emails over building this now (see
   once it shows real config/state.
 - **recreation.gov specifics**: which permit(s)/park(s) to watch first, and
   the exact endpoint shape — needs a research spike in Phase 4, not a guess.
+- ~~**recreation.gov campground specifics**~~ — resolved 2026-07-27, see
+  Phase 8's research spike entry.
 - **Chores model**: are chores time-based reminders (e.g. "every Tuesday")
   or state-based (e.g. "bin day, check if already marked done")? Affects
   whether the Phase 2 schema needs a `schedule` field now or later.
