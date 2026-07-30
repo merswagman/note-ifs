@@ -47,13 +47,20 @@ def check_campground_watch(watch):
     Checks a config watch of type "campground" (params: campground_ids,
     dates) against recreation.gov's live per-site availability.
 
-    Returns {date: {campground_id: [{"site", "loop", "campsite_id"}, ...]}}
-    containing only campground/date combinations with at least one site
-    marked "Available". Empty dict means nothing is currently available.
+    `dates` is treated as a single contiguous stay, not independent
+    alternatives: a site only counts as a hit if it's marked "Available"
+    for every date in the list (e.g. dates ["2026-08-07", "2026-08-08"]
+    means a site must be free both nights, not just one or the other) --
+    that's what "book a trip covering these nights" actually requires.
+
+    Returns {campground_id: [{"site", "loop", "campsite_id"}, ...]}
+    containing only campgrounds with at least one site free for every
+    requested date. Empty dict means no full-stay availability right now.
     """
     params = watch["params"]
     campground_ids = params["campground_ids"]
     dates = params["dates"]
+    required_keys = [f"{date}T00:00:00Z" for date in dates]
 
     months_needed = sorted({(date[:4], date[5:7]) for date in dates})
 
@@ -61,37 +68,38 @@ def check_campground_watch(watch):
     for i, campground_id in enumerate(campground_ids):
         if i > 0:
             time.sleep(REQUEST_DELAY_SECONDS)
-        month_cache = {
-            (year, month): _fetch_month_availability(campground_id, int(year), int(month))
-            for year, month in months_needed
-        }
-        for date in dates:
-            year, month = date[:4], date[5:7]
-            campsites = month_cache[(year, month)]
-            date_key = f"{date}T00:00:00Z"
-            open_sites = [
-                {
-                    "campsite_id": campsite_id,
-                    "site": site.get("site"),
-                    "loop": site.get("loop"),
-                }
-                for campsite_id, site in campsites.items()
-                if site.get("availabilities", {}).get(date_key) == "Available"
-            ]
-            if open_sites:
-                available.setdefault(date, {})[campground_id] = open_sites
+
+        # Merge each requested month's campsite availability into one map
+        # per site, since a multi-night stay can span a month boundary.
+        merged_sites = {}
+        for year, month in months_needed:
+            for campsite_id, site in _fetch_month_availability(
+                campground_id, int(year), int(month)
+            ).items():
+                entry = merged_sites.setdefault(
+                    campsite_id,
+                    {"site": site.get("site"), "loop": site.get("loop"), "availabilities": {}},
+                )
+                entry["availabilities"].update(site.get("availabilities", {}))
+
+        open_sites = [
+            {"campsite_id": campsite_id, "site": site["site"], "loop": site["loop"]}
+            for campsite_id, site in merged_sites.items()
+            if all(site["availabilities"].get(key) == "Available" for key in required_keys)
+        ]
+        if open_sites:
+            available[campground_id] = open_sites
 
     return available
 
 
 def format_lines(watch, availability):
     """Email body lines for a campground watch's availability results."""
-    lines = []
-    for date, by_campground in sorted(availability.items()):
-        lines.append(f"{date}:")
-        for campground_id, sites in sorted(by_campground.items()):
-            lines.append(f"  {registration_url(campground_id)}")
-            for site in sites:
-                lines.append(f"    site {site['site']} (loop {site['loop']})")
+    dates = ", ".join(watch["params"]["dates"])
+    lines = [f"Available for all of: {dates}", ""]
+    for campground_id, sites in sorted(availability.items()):
+        lines.append(f"  {registration_url(campground_id)}")
+        for site in sites:
+            lines.append(f"    site {site['site']} (loop {site['loop']})")
         lines.append("")
     return lines

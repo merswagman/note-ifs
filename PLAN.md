@@ -14,16 +14,20 @@ by screenshotting the Flask dev server with headless Chromium — not yet
 redeployed to Vercel. Do that next. Phase 5 (state persistence) remains on
 hold by explicit user choice.
 
-**Phase 8 (multi-recipient / second user)** started and mostly built
-2026-07-27: a friend wants his own watches emailed to his own address
-instead of Christopher's, for 4 campgrounds (not a wilderness permit) he's
-watching. Built and verified against live data: per-watch `notify_to`
-email routing, a new `campground` watch type + `campground_checker.py`
-(recreation.gov's campground API is a different shape from the permit
-itinerary API — confirmed via a research spike, not assumed), and
-`app.py` generalized to dispatch email formatting per watch type. Only
-remaining blocker: the friend's email address, to fill in a draft config
-entry that's otherwise ready to commit (see Phase 8 section below).
+**Phase 8 (multi-recipient / second user)** deployed 2026-07-27, bug fixed
+2026-07-30. A friend gets his own watch emailed to his own address
+(`notify_to`), covering 4 campgrounds via a new `campground` watch type +
+`campground_checker.py`. Found and fixed a real correctness bug the day
+after go-live: the checker treated each requested date as an independent
+"is anything open anywhere" check, so it flagged campgrounds as available
+based on scattered single-night openings (mostly Sunday checkout gaps)
+that never actually covered his full requested stay — no site was ever
+open for *both* nights he needed. Rewritten to require every date in a
+watch's `dates` list to be free on the *same* site before it counts as a
+hit (a real "book a trip" semantics, not "any night, any site"). Verified
+against live data both ways (correctly empty for the actually-booked-out
+8/7–8/8, correctly non-empty for a known-open multi-night stretch). See
+Phase 8 section and its 2026-07-30 decisions log entry for detail.
 
 Phase 1 remaining loose end: confirm Vercel's GitHub App has
 deploy-on-push access (not yet needed, since deploys so far are manual
@@ -50,6 +54,7 @@ deploy-on-push access (not yet needed, since deploys so far are manual
 | 2026-07-15 | Phase 5 (dedup/state persistence) deliberately skipped for now; checker wired straight to email | User's explicit call: "we can hold off on the persistence... I think I want to be spammed by it for now. (but only email me when there's availability and not when there's not)." So `/api/cron/check` re-checks and re-emails every hour availability persists, with no memory of previous runs. Revisit Phase 5 only if this becomes annoying in practice. |
 | 2026-07-15 | Status page shows a computed "next check" time, not a tracked "last checked" time | A real last-checked timestamp needs persisted state (same blocker as Phase 5, still on hold); the next scheduled run is fully derivable from the known GitHub Actions cron schedule (`17 * * * *`) with no storage needed. Must be kept in sync by hand with the workflow file if the schedule changes — there's a pointer comment in `app.py` at `CRON_MINUTE_PAST_HOUR`. |
 | 2026-07-27 | Multi-recipient routing is a per-watch optional `notify_to` field, not a top-level "users" concept, and not a bump to `CONFIG_VERSION` | A friend now wants his own permit/campground watches emailed to his own address. Per-watch is the smallest change that fits the existing flat `watches` list — no new top-level structure needed, and every existing watch still validates unchanged (field is optional, falls back to `NOTIFY_EMAIL_TO`/`SMTP_USERNAME` exactly as before), so per CLAUDE.md's own rule this is additive, not a breaking schema change. Revisit if a real multi-user concept (per-user watch grouping, per-user status page filtering) becomes worth it — not needed yet for one friend and a handful of watches. |
+| 2026-07-30 | `campground` watch `dates` means "must all be free on the same site" (a contiguous stay), not "any one of these dates on any site" | The friend was getting hourly emails claiming availability that was never actually bookable. Confirmed against live recreation.gov data this wasn't a data/parsing bug — the checker was correctly reporting real single-night openings (mostly Sunday-checkout gaps at Front Range campgrounds), but those never covered the full 2-night weekend stay he actually needs, so the emails were technically accurate per-night but practically useless. Changed `check_campground_watch`'s matching logic and return shape (`{campground_id: [sites]}` instead of `{date: {campground_id: [sites]}}`) so a hit means "this site works for your whole trip." Raised, but didn't act on, whether `permit_checker.py` has the same independent-dates issue for multi-night permits (e.g. Snowmass Lake) — needs Christopher's input before touching permit semantics. |
 
 ## Phases
 
@@ -294,14 +299,12 @@ User explicitly chose repeat/duplicate emails over building this now (see
     Gulch) — all share `parent_asset_id: "1053"` (same park/area).
 - [x] `campground_checker.py` added, mirroring `permit_checker.py`'s shape:
       `check_campground_watch(watch)` takes `params.campground_ids` +
-      `params.dates`, returns
-      `{date: {campground_id: [{"campsite_id", "site", "loop"}, ...]}}` for
-      only the available combinations. `format_lines(watch, availability)`
-      builds the email body section for this type. Verified against live
-      data both ways: the friend's actual target (4 campgrounds, 8/7 and
-      8/8/2026) currently correctly returns `{}` (nothing open yet), and a
-      known-open date (233720, 2026-08-04) correctly returned real site
-      numbers/loops.
+      `params.dates`. **Original return shape**
+      `{date: {campground_id: [{"campsite_id", "site", "loop"}, ...]}}`
+      (independent per-date) **was changed 2026-07-30** to
+      `{campground_id: [sites]}` (site must be open for *all* requested
+      dates) — see the bug-fix entry below for why. `format_lines(watch,
+      availability)` builds the email body section for this type.
 - [x] `type: "campground"` added to `KNOWN_WATCH_TYPES` in
       `config_schema.py`, with `params.source` (must be
       `KNOWN_CAMPGROUND_SOURCES`, currently just `"recreation.gov"`),
@@ -316,14 +319,54 @@ User explicitly chose repeat/duplicate emails over building this now (see
       no regression via the same `/api/cron/check` real-data test above.
 - [x] Friend's email (matthewhale1090@gmail.com) added as `notify_to` on a
       new `friend-campgrounds-2026-08-07` watch in `config/config.json`
-      (campground_ids `233720`/`233722`/`233721`/`233718`, dates
-      `2026-08-07`/`2026-08-08`/`2026-08-09` — extended from 2 to 3 dates
-      2026-07-28 at his request). Verified end-to-end via the real
-      `/api/cron/check` path: config loads, all 3 watches (his + Christopher's
-      2 permit watches) get checked in one run, 200 OK, no email sent since
-      nothing's available yet at any of the 4 campgrounds for those dates.
-      Runs automatically on the existing hourly GitHub Actions schedule —
-      no separate scheduling needed for a second recipient.
+      (campground_ids `233720`/`233722`/`233721`/`233718`). Dates were
+      briefly `2026-08-07`/`08`/`09` (extended to 3 dates 2026-07-28 at his
+      request) but reverted to just `08-07`/`08-08` on 2026-07-30 once the
+      "must be both nights" bug below was understood — see that entry.
+- [x] **Bug found and fixed (2026-07-30)**: the friend reported every
+      hourly email "showing availability" that was never actually
+      bookable. Investigated by pulling the exact same raw recreation.gov
+      data the checker used at send time and diffing it against the sent
+      email — the email matched the raw API exactly, so this wasn't a
+      parsing bug. The real problem was semantic: `check_campground_watch`
+      treated `dates` as independent alternatives ("is any site open on
+      any one of these dates"), so it flagged campgrounds where, e.g.,
+      site 014 at Riverside was open 8/9 only (Reserved both 8/7 and
+      8/8) — a real single-night opening, but useless for a trip that
+      needs both 8/7 and 8/8. Confirmed directly against live data that
+      **no site across any of the 4 campgrounds had all of 8/7+8/8+8/9
+      open together** at the time the false-positive email went out. Root
+      cause: recreation.gov's own weekend booking pattern (Fri/Sat nights
+      booked solid, scattered Sunday-checkout gaps reopening on random
+      sites) looks exactly like sporadic "availability" if you check each
+      night in isolation.
+  - Fix: `check_campground_watch` now only counts a site as a hit if it's
+    `"Available"` for *every* date in the watch's `dates` list (merging
+    availability across month boundaries first, since a stay can span
+    two calendar months) — i.e. `dates` means "this contiguous stay",
+    not "any of these nights". Return shape simplified from
+    `{date: {campground_id: [sites]}}` to `{campground_id: [sites]}`
+    since a qualifying site is now good for the whole requested stay by
+    definition. `format_lines` updated to match ("Available for all of:
+    <dates>" instead of a per-date breakdown).
+  - Verified against live data both ways: the actual friend watch
+    (8/7+8/8, both weekend nights) now correctly returns `{}` — nothing
+    is open for both nights right now, matching manual/live confirmation
+    that the campgrounds are fully booked those two nights. A synthetic
+    watch against a known multi-night-open stretch (Riverside, 8/4+8/5)
+    correctly returned real qualifying sites. Full `/api/cron/check` run
+    (all 3 watches, real creds) still 200 OK, no regression to the permit
+    watches.
+  - **Open question this raised, not yet acted on**: the existing
+    Snowmass Lake permit watch (`dates: ["2026-08-21", "2026-08-22"]`,
+    also a 2-night backpacking trip) has the *same* independent-dates
+    semantics in `permit_checker.py` — it reports each date/division
+    independently rather than requiring the same division to be open
+    both nights. Unknown whether that's actually wrong for permits (wilderness
+    permits may not require a fixed campsite per night the way a
+    reservable campground site does) or the same class of bug. Flag to
+    Christopher; don't change `permit_checker.py` without confirming
+    intent first.
 - [ ] Confirm with Christopher whether the friend should also be able to
       see the status page (`/`) — currently unauthenticated, shows all
       watches from everyone, no per-user filtering.
